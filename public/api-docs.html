@@ -439,9 +439,13 @@
 
             <div class="sidebar-title">API Reference</div>
             <a href="#agent">Agent</a>
+            <a href="#projects-endpoint">Projects</a>
+            <a href="#sessions-endpoint">Project Sessions</a>
+            <a href="#messages-endpoint">Session Messages</a>
 
             <div class="sidebar-title">Examples</div>
             <a href="#usage-examples">Usage Patterns</a>
+            <a href="#session-demo">Session Demo App</a>
         </nav>
 
         <div class="content-wrapper">
@@ -449,7 +453,7 @@
             <div class="section-row">
                 <div class="docs-section">
                     <div class="intro">
-                        <p><strong>Programmatically trigger AI agents to work on projects.</strong> Clone GitHub repositories or use existing project paths. Perfect for CI/CD pipelines, automated code reviews, and bulk processing.</p>
+                        <p><strong>Programmatically trigger AI agents and work with existing sessions.</strong> Clone GitHub repositories or use existing project paths, inspect discovered projects and sessions, load normalized message history, and resume a session by ID.</p>
                     </div>
 
                     <section id="authentication">
@@ -489,7 +493,7 @@
                                 <span class="endpoint-path"><span class="api-url">http://localhost:3001</span>/api/agent</span>
                             </div>
 
-                            <p>Trigger an AI agent (Claude, Cursor, or Codex) to work on a project.</p>
+                            <p>Trigger an AI agent (Claude, Cursor, Codex, or Gemini) to work on a project. If you pass a <code>sessionId</code>, the request resumes that existing session instead of starting a new one.</p>
 
                             <h4>Request Body Parameters</h4>
                             <table>
@@ -515,6 +519,12 @@
                                         <td>Path to existing project OR destination for cloning. If omitted with <code>githubUrl</code>, auto-generates path. If used alone, must point to existing project directory.</td>
                                     </tr>
                                     <tr>
+                                        <td><code>sessionId</code></td>
+                                        <td>string</td>
+                                        <td><span class="badge badge-optional">Optional</span></td>
+                                        <td>Resume an existing session instead of creating a new one. Discover valid IDs via the session endpoints below. In practice you should send this together with <code>projectPath</code>.</td>
+                                    </tr>
+                                    <tr>
                                         <td><code>message</code></td>
                                         <td>string</td>
                                         <td><span class="badge badge-required">Required</span></td>
@@ -524,7 +534,7 @@
                                         <td><code>provider</code></td>
                                         <td>string</td>
                                         <td><span class="badge badge-optional">Optional</span></td>
-                                        <td><code>claude</code>, <code>cursor</code>, or <code>codex</code> (default: <code>claude</code>)</td>
+                                        <td><code>claude</code>, <code>cursor</code>, <code>codex</code>, or <code>gemini</code> (default: <code>claude</code>)</td>
                                     </tr>
                                     <tr>
                                         <td><code>stream</code></td>
@@ -578,7 +588,8 @@
                                 <strong>Scenario 1:</strong> Only <code>githubUrl</code> → Clones to auto-generated temporary path<br>
                                 <strong>Scenario 2:</strong> Only <code>projectPath</code> → Uses existing project at specified path<br>
                                 <strong>Scenario 3:</strong> Both provided → Clones <code>githubUrl</code> to <code>projectPath</code><br><br>
-                                <strong>Validation:</strong> If <code>projectPath</code> exists and contains a git repository, the remote URL is compared with <code>githubUrl</code>. If URLs match, the existing repo is reused. If URLs differ, an error is returned.
+                                <strong>Validation:</strong> If <code>projectPath</code> exists and contains a git repository, the remote URL is compared with <code>githubUrl</code>. If URLs match, the existing repo is reused. If URLs differ, an error is returned.<br><br>
+                                <strong>Resume Behavior:</strong> If you provide <code>sessionId</code>, CloudCLI resumes that session on the selected provider. Use <code>/api/agent/projects</code> and <code>/api/agent/projects/:projectName/sessions</code> to discover the correct session first.
                             </div>
 
                             <h4>Response (Streaming)</h4>
@@ -702,11 +713,95 @@ data: {"type":"done"}</code></pre>
                     </div>
 
                     <div class="example-block">
+                        <h4>Resume Existing Claude Session</h4>
+<pre><code class="language-bash">curl -X POST <span class="api-url">http://localhost:3001</span>/api/agent \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ck_..." \
+  -d '{
+    "provider": "claude",
+    "projectPath": "/home/user/my-project",
+    "sessionId": "claude-session-123",
+    "message": "Continue from the previous plan and implement the next step",
+    "stream": false
+  }'</code></pre>
+                    </div>
+
+                    <div class="example-block">
                         <h4>Error Response</h4>
 <pre><code class="language-json">{
   "success": false,
   "error": "Directory exists with different repo"
 }</code></pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-row">
+                <div class="docs-section">
+                    <section id="projects-endpoint">
+                        <h2>Projects</h2>
+
+                        <div class="endpoint">
+                            <div class="endpoint-header">
+                                <span class="method" style="background: var(--primary); color: white;">GET</span>
+                                <span class="endpoint-path"><span class="api-url">http://localhost:3001</span>/api/agent/projects</span>
+                            </div>
+
+                            <p>Return the projects CloudCLI discovered from local Claude/Cursor/Codex/Gemini state. Each project includes its display name, resolved path, and session summaries already known to the UI.</p>
+
+                            <div class="note">
+                                <strong>Important:</strong> The <code>projectName</code> in the response is the encoded project identifier CloudCLI uses internally. Reuse that exact value with the project session and message endpoints.
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="sessions-endpoint">
+                        <h2>Project Sessions</h2>
+
+                        <div class="endpoint">
+                            <div class="endpoint-header">
+                                <span class="method" style="background: var(--primary); color: white;">GET</span>
+                                <span class="endpoint-path"><span class="api-url">http://localhost:3001</span>/api/agent/projects/:projectName/sessions</span>
+                            </div>
+
+                            <p>Return sessions for a specific project. Claude sessions support pagination with <code>limit</code> and <code>offset</code>. For non-Claude providers, set <code>provider=cursor</code>, <code>provider=codex</code>, or <code>provider=gemini</code>.</p>
+                            <div class="note">
+                                <strong>Returned session metadata:</strong> each session includes <code>provider</code>, <code>providerLabel</code>, <code>providerIcon</code>, <code>providerIconDark</code>, <code>model</code>, <code>modelLabel</code>, and <code>modelProvider</code> when available. These fields are intended for external apps that want to render the same provider badge/icon treatment as CloudCLI UI.
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="messages-endpoint">
+                        <h2>Session Messages</h2>
+
+                        <div class="endpoint">
+                            <div class="endpoint-header">
+                                <span class="method" style="background: var(--primary); color: white;">GET</span>
+                                <span class="endpoint-path"><span class="api-url">http://localhost:3001</span>/api/agent/sessions/:sessionId/messages</span>
+                            </div>
+
+                            <p>Load normalized message history for a session. Use <code>provider=claude</code> plus <code>projectName</code> for Claude sessions, or <code>provider=cursor</code> plus <code>projectPath</code> for Cursor sessions. Codex and Gemini only need <code>sessionId</code>.</p>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="examples-section">
+                    <div class="example-block">
+                        <h4>List Projects</h4>
+<pre><code class="language-bash">curl -X GET <span class="api-url">http://localhost:3001</span>/api/agent/projects \
+  -H "X-API-Key: ck_..."</code></pre>
+                    </div>
+
+                    <div class="example-block">
+                        <h4>List Claude Sessions</h4>
+<pre><code class="language-bash">curl -X GET "<span class="api-url">http://localhost:3001</span>/api/agent/projects/-Users-ege-my-project/sessions?provider=claude&limit=50&offset=0" \
+  -H "X-API-Key: ck_..."</code></pre>
+                    </div>
+
+                    <div class="example-block">
+                        <h4>Load Session History</h4>
+<pre><code class="language-bash">curl -X GET "<span class="api-url">http://localhost:3001</span>/api/agent/sessions/claude-session-123/messages?provider=claude&projectName=-Users-ege-my-project" \
+  -H "X-API-Key: ck_..."</code></pre>
                     </div>
                 </div>
             </div>
@@ -731,6 +826,14 @@ data: {"type":"done"}</code></pre>
 
                         <h3>Create Branch and Pull Request</h3>
                         <p>Automatically create a new branch and pull request after the agent completes its work. Branch names are auto-generated from the message, and PR title/description are auto-generated from commit messages.</p>
+                    </section>
+
+                    <section id="session-demo" style="margin-top: 3rem;">
+                        <h3>Session Demo App</h3>
+                        <p>A minimal browser app that uses the external session API is included with this build.</p>
+                        <div class="note">
+                            <strong>Open:</strong> <a href="/session-api-demo.html">/session-api-demo.html</a>
+                        </div>
                     </section>
                 </div>
 
@@ -822,7 +925,7 @@ data: {"type":"done"}</code></pre>
 
     <script type="module">
         // Import model constants
-        import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '/shared/modelConstants.js';
+        import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '/shared/modelConstants.js';
 
         // Dynamic URL replacement
         const apiUrl = window.location.origin;
@@ -837,12 +940,14 @@ data: {"type":"done"}</code></pre>
                 const claudeModels = CLAUDE_MODELS.OPTIONS.map(m => `<code>${m.value}</code>`).join(', ');
                 const cursorModels = CURSOR_MODELS.OPTIONS.slice(0, 8).map(m => `<code>${m.value}</code>`).join(', ');
                 const codexModels = CODEX_MODELS.OPTIONS.map(m => `<code>${m.value}</code>`).join(', ');
+                const geminiModels = GEMINI_MODELS.OPTIONS.map(m => `<code>${m.value}</code>`).join(', ');
 
                 modelCell.innerHTML = `
                     Model identifier for the AI provider:<br><br>
                     <strong>Claude:</strong> ${claudeModels} (default: <code>${CLAUDE_MODELS.DEFAULT}</code>)<br><br>
                     <strong>Cursor:</strong> ${cursorModels}, and more (default: <code>${CURSOR_MODELS.DEFAULT}</code>)<br><br>
-                    <strong>Codex:</strong> ${codexModels} (default: <code>${CODEX_MODELS.DEFAULT}</code>)
+                    <strong>Codex:</strong> ${codexModels} (default: <code>${CODEX_MODELS.DEFAULT}</code>)<br><br>
+                    <strong>Gemini:</strong> ${geminiModels} (default: <code>${GEMINI_MODELS.DEFAULT}</code>)
                 `;
             }
         });
