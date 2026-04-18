@@ -1,20 +1,53 @@
-import express from 'express';
-import { spawn } from 'child_process';
-import path from 'path';
-import os from 'os';
-import { promises as fs } from 'fs';
 import crypto from 'crypto';
-import { userDb, apiKeysDb, githubTokensDb } from '../database/db.js';
-import { addProjectManually } from '../projects.js';
-import { queryClaudeSDK } from '../claude-sdk.js';
-import { spawnCursor } from '../cursor-cli.js';
-import { queryCodex } from '../openai-codex.js';
-import { spawnGemini } from '../gemini-cli.js';
+import { spawn } from 'child_process';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+
+import express from 'express';
 import { Octokit } from '@octokit/rest';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '../../shared/modelConstants.js';
+
+import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../shared/modelConstants.js';
+import { queryClaudeSDK } from '../claude-sdk.js';
 import { IS_PLATFORM } from '../constants/config.js';
+import { spawnCursor } from '../cursor-cli.js';
+import { userDb, apiKeysDb, githubTokensDb } from '../database/db.js';
+import { queryCodex } from '../openai-codex.js';
+import { addProjectManually, getProjects, getSessions } from '../projects.js';
+import { getAllProviders, getProvider } from '../providers/registry.js';
+import { spawnGemini } from '../gemini-cli.js';
 
 const router = express.Router();
+const VALID_PROVIDERS = ['claude', 'cursor', 'codex', 'gemini'];
+const SAFE_SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,200}$/;
+const PROVIDER_METADATA = {
+  claude: {
+    providerLabel: 'Claude',
+    providerIcon: '/icons/claude-ai-icon.svg',
+    providerIconDark: '/icons/claude-ai-icon.svg',
+  },
+  cursor: {
+    providerLabel: 'Cursor',
+    providerIcon: '/icons/cursor.svg',
+    providerIconDark: '/icons/cursor-white.svg',
+  },
+  codex: {
+    providerLabel: 'Codex',
+    providerIcon: '/icons/codex.svg',
+    providerIconDark: '/icons/codex-white.svg',
+  },
+  gemini: {
+    providerLabel: 'Gemini',
+    providerIcon: '/icons/gemini-ai-icon.svg',
+    providerIconDark: '/icons/gemini-ai-icon.svg',
+  }
+};
+const MODEL_REGISTRIES = {
+  claude: CLAUDE_MODELS,
+  cursor: CURSOR_MODELS,
+  codex: CODEX_MODELS,
+  gemini: GEMINI_MODELS,
+};
 
 /**
  * Middleware to authenticate agent API requests.
@@ -60,6 +93,244 @@ const validateExternalApiKey = (req, res, next) => {
   req.user = user;
   next();
 };
+
+function parseOptionalPositiveInt(value, { defaultValue = null, max = 500 } = {}) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  const parsed = Number.parseInt(String(value), 10);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return defaultValue;
+  }
+
+  return Math.min(parsed, max);
+}
+
+function validateProvider(provider) {
+  return VALID_PROVIDERS.includes(provider);
+}
+
+function getProjectSessionsForProvider(project, provider) {
+  if (provider === 'cursor') {
+    return project.cursorSessions || [];
+  }
+  if (provider === 'codex') {
+    return project.codexSessions || [];
+  }
+  if (provider === 'gemini') {
+    return project.geminiSessions || [];
+  }
+  return project.sessions || [];
+}
+
+function inferModelProvider(provider, model) {
+  if (!model || typeof model !== 'string') {
+    return provider === 'claude'
+      ? 'anthropic'
+      : provider === 'codex'
+        ? 'openai'
+        : provider === 'gemini'
+          ? 'google'
+          : 'cursor';
+  }
+
+  const normalized = model.toLowerCase();
+  if (normalized.startsWith('claude') || normalized.startsWith('sonnet') || normalized.startsWith('opus') || normalized.startsWith('haiku')) {
+    return 'anthropic';
+  }
+  if (normalized.startsWith('gpt') || normalized.startsWith('o1') || normalized.startsWith('o3') || normalized.startsWith('o4') || normalized.includes('codex')) {
+    return 'openai';
+  }
+  if (normalized.startsWith('gemini')) {
+    return 'google';
+  }
+  if (normalized.startsWith('grok')) {
+    return 'xai';
+  }
+  if (normalized.startsWith('auto') || normalized.startsWith('composer')) {
+    return 'cursor';
+  }
+
+  return provider;
+}
+
+function formatModelLabelFallback(model) {
+  if (!model || typeof model !== 'string') {
+    return null;
+  }
+
+  return model
+    .replace(/\[1m\]/gi, '[1M]')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function resolveModelLabel(provider, model) {
+  if (!model || typeof model !== 'string') {
+    return null;
+  }
+
+  const registry = MODEL_REGISTRIES[provider];
+  const match = registry?.OPTIONS?.find(option => option.value === model);
+  return match?.label || formatModelLabelFallback(model);
+}
+
+function decorateSession(session, provider) {
+  const resolvedProvider = provider || session.provider || 'claude';
+  const providerInfo = PROVIDER_METADATA[resolvedProvider] || PROVIDER_METADATA.claude;
+  const model = typeof session.model === 'string' && session.model.trim() ? session.model : null;
+
+  return {
+    ...session,
+    provider: resolvedProvider,
+    ...providerInfo,
+    model,
+    modelLabel: resolveModelLabel(resolvedProvider, model),
+    modelProvider: session.modelProvider || inferModelProvider(resolvedProvider, model),
+  };
+}
+
+function decorateProject(project) {
+  return {
+    ...project,
+    sessions: (project.sessions || []).map(session => decorateSession(session, 'claude')),
+    cursorSessions: (project.cursorSessions || []).map(session => decorateSession(session, 'cursor')),
+    codexSessions: (project.codexSessions || []).map(session => decorateSession(session, 'codex')),
+    geminiSessions: (project.geminiSessions || []).map(session => decorateSession(session, 'gemini')),
+  };
+}
+
+router.get('/projects', validateExternalApiKey, async (req, res) => {
+  try {
+    const projects = (await getProjects()).map(decorateProject);
+    res.json({ success: true, projects });
+  } catch (error) {
+    console.error('Error fetching external API projects:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch projects' });
+  }
+});
+
+router.get('/projects/:projectName/sessions', validateExternalApiKey, async (req, res) => {
+  try {
+    const { projectName } = req.params;
+    const provider = String(req.query.provider || 'claude');
+
+    if (!validateProvider(provider)) {
+      return res.status(400).json({
+        success: false,
+        error: `Unknown provider: ${provider}. Available: ${VALID_PROVIDERS.join(', ')}`
+      });
+    }
+
+    const offset = parseOptionalPositiveInt(req.query.offset, { defaultValue: 0, max: 10000 });
+    const limit = parseOptionalPositiveInt(req.query.limit, {
+      defaultValue: provider === 'claude' ? 20 : null,
+      max: 200
+    });
+
+    if (provider === 'claude') {
+      const result = await getSessions(projectName, limit ?? 20, offset);
+      return res.json({
+        success: true,
+        provider,
+        providerInfo: PROVIDER_METADATA[provider],
+        projectName,
+        sessions: (result.sessions || []).map(session => decorateSession(session, provider)),
+        total: result.total,
+        offset: result.offset,
+        limit: result.limit,
+        hasMore: result.hasMore,
+      });
+    }
+
+    const projects = (await getProjects()).map(decorateProject);
+    const project = projects.find(candidate => candidate.name === projectName);
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        error: `Project not found: ${projectName}`
+      });
+    }
+
+    const allSessions = getProjectSessionsForProvider(project, provider);
+    const total = allSessions.length;
+    const paginatedSessions = limit === null
+      ? allSessions.slice(offset)
+      : allSessions.slice(offset, offset + limit);
+
+    return res.json({
+      success: true,
+      provider,
+      providerInfo: PROVIDER_METADATA[provider],
+      projectName,
+      sessions: paginatedSessions,
+      total,
+      offset,
+      limit,
+      hasMore: limit === null ? false : offset + limit < total
+    });
+  } catch (error) {
+    console.error('Error fetching external API sessions:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch sessions' });
+  }
+});
+
+router.get('/sessions/:sessionId/messages', validateExternalApiKey, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const provider = String(req.query.provider || 'claude');
+    const projectName = typeof req.query.projectName === 'string' ? req.query.projectName : '';
+    const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : '';
+    const limit = parseOptionalPositiveInt(req.query.limit, { defaultValue: null, max: 500 });
+    const offset = parseOptionalPositiveInt(req.query.offset, { defaultValue: 0, max: 10000 });
+
+    if (!SAFE_SESSION_ID_PATTERN.test(sessionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid sessionId' });
+    }
+
+    if (!validateProvider(provider)) {
+      return res.status(400).json({
+        success: false,
+        error: `Unknown provider: ${provider}. Available: ${getAllProviders().join(', ')}`
+      });
+    }
+
+    if (provider === 'claude' && !projectName) {
+      return res.status(400).json({
+        success: false,
+        error: 'projectName is required for Claude session history'
+      });
+    }
+
+    if (provider === 'cursor' && !projectPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'projectPath is required for Cursor session history'
+      });
+    }
+
+    const adapter = getProvider(provider);
+    const result = await adapter.fetchHistory(sessionId, {
+      projectName,
+      projectPath,
+      limit,
+      offset
+    });
+
+    res.json({
+      success: true,
+      provider,
+      providerInfo: PROVIDER_METADATA[provider],
+      sessionId,
+      ...result
+    });
+  } catch (error) {
+    console.error('Error fetching external API session messages:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch session messages' });
+  }
+});
 
 /**
  * Get the remote URL of a git repository

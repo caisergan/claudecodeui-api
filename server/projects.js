@@ -799,6 +799,7 @@ async function parseJsonlSessions(filePath) {
                 messageCount: 0,
                 lastActivity: new Date(),
                 cwd: entry.cwd || '',
+                model: null,
                 lastUserMessage: null,
                 lastAssistantMessage: null
               });
@@ -844,6 +845,10 @@ async function parseJsonlSessions(filePath) {
                 session.lastUserMessage = textContent;
               }
             } else if (entry.message?.role === 'assistant' && entry.message?.content) {
+              if (typeof entry.message?.model === 'string' && entry.message.model.trim() && entry.message.model !== '<synthetic>') {
+                session.model = entry.message.model;
+              }
+
               // Skip API error messages using the isApiErrorMessage flag
               if (entry.isApiErrorMessage === true) {
                 // Skip this message entirely
@@ -1338,6 +1343,15 @@ async function getCursorSessions(projectPath) {
 
         // Extract session info
         const sessionName = metadata.title || metadata.sessionTitle || 'Untitled Session';
+        const sessionModel =
+          metadata.model ||
+          metadata.modelName ||
+          metadata.aiModel ||
+          metadata.chatModel ||
+          metadata.lastModel ||
+          metadata.defaultModel ||
+          metadata.modelSlug ||
+          null;
 
         // Determine timestamp - prefer createdAt from metadata, fall back to db file mtime
         let createdAt = null;
@@ -1355,7 +1369,9 @@ async function getCursorSessions(projectPath) {
           createdAt: createdAt,
           lastActivity: createdAt, // For compatibility with Claude sessions
           messageCount: messageCountResult.count || 0,
-          projectPath: projectPath
+          projectPath: projectPath,
+          model: typeof sessionModel === 'string' ? sessionModel : null,
+          provider: 'cursor'
         });
 
       } catch (error) {
@@ -1521,6 +1537,7 @@ async function parseCodexSessionFile(filePath) {
     let lastTimestamp = null;
     let lastUserMessage = null;
     let messageCount = 0;
+    let currentModel = null;
 
     for await (const line of rl) {
       if (line.trim()) {
@@ -1538,9 +1555,16 @@ async function parseCodexSessionFile(filePath) {
               id: entry.payload.id,
               cwd: entry.payload.cwd,
               model: entry.payload.model || entry.payload.model_provider,
+              modelProvider: entry.payload.model_provider || null,
               timestamp: entry.timestamp,
               git: entry.payload.git
             };
+          }
+
+          if (entry.type === 'turn_context' && entry.payload) {
+            if (typeof entry.payload.model === 'string' && entry.payload.model.trim()) {
+              currentModel = entry.payload.model;
+            }
           }
 
           // Count visible user messages and extract summary from the latest plain user input.
@@ -1564,6 +1588,7 @@ async function parseCodexSessionFile(filePath) {
     if (sessionMeta) {
       return {
         ...sessionMeta,
+        model: currentModel || sessionMeta.model || null,
         timestamp: lastTimestamp || sessionMeta.timestamp,
         summary: lastUserMessage ?
           (lastUserMessage.length > 50 ? lastUserMessage.substring(0, 50) + '...' : lastUserMessage) :
@@ -2465,7 +2490,13 @@ async function getGeminiCliSessions(projectPath) {
           summary,
           messageCount: session.messages.length,
           lastActivity: session.lastUpdated || session.startTime || null,
-          provider: 'gemini'
+          provider: 'gemini',
+          model:
+            session.model ||
+            session.modelName ||
+            session.config?.model ||
+            session.metadata?.model ||
+            null
         });
       } catch {
         continue;

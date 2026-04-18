@@ -12,6 +12,13 @@ export interface ProjectSession {
   updated_at?: string;
   lastActivity?: string;
   messageCount?: number;
+  provider?: LLMProvider;
+  providerLabel?: string;
+  providerIcon?: string;
+  providerIconDark?: string;
+  model?: string | null;
+  modelLabel?: string | null;
+  modelProvider?: string | null;
   __provider?: LLMProvider;
   __projectName?: string;
   [key: string]: unknown;
