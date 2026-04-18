@@ -140,3 +140,6 @@ tasks/
 
 # Git worktrees
 .worktrees/
+
+# Graphify Folders
+graphify-out/
