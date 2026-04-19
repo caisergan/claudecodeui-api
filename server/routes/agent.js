@@ -733,6 +733,11 @@ class SSEStreamWriter {
       return;
     }
 
+    const canonicalSessionId = extractCanonicalSessionId(data);
+    if (canonicalSessionId) {
+      this.sessionId = canonicalSessionId;
+    }
+
     // Format as SSE - providers send raw objects, we stringify
     this.res.write(`data: ${JSON.stringify(data)}\n\n`);
   }
@@ -772,14 +777,18 @@ class ResponseCollector {
     if (typeof data === 'string') {
       try {
         const parsed = JSON.parse(data);
-        if (parsed.sessionId) {
-          this.sessionId = parsed.sessionId;
+        const canonicalSessionId = extractCanonicalSessionId(parsed);
+        if (canonicalSessionId) {
+          this.sessionId = canonicalSessionId;
         }
       } catch (e) {
         // Not JSON, ignore
       }
-    } else if (data && data.sessionId) {
-      this.sessionId = data.sessionId;
+    } else {
+      const canonicalSessionId = extractCanonicalSessionId(data);
+      if (canonicalSessionId) {
+        this.sessionId = canonicalSessionId;
+      }
     }
   }
 
@@ -870,6 +879,14 @@ class ResponseCollector {
       totalTokens: totalInput + totalOutput + totalCacheRead + totalCacheCreation
     };
   }
+}
+
+function extractCanonicalSessionId(data) {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  return data.actualSessionId || data.newSessionId || data.sessionId || null;
 }
 
 // ===============================

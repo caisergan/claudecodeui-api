@@ -258,6 +258,15 @@ export async function queryCodex(command, options = {}, ws) {
         break;
       }
 
+      if (event.type === 'thread.started' && event.id && event.id !== currentSessionId) {
+        const activeSession = activeCodexSessions.get(currentSessionId);
+        if (activeSession) {
+          activeCodexSessions.delete(currentSessionId);
+          activeCodexSessions.set(event.id, activeSession);
+        }
+        currentSessionId = event.id;
+      }
+
       if (event.type === 'item.started' || event.type === 'item.updated') {
         continue;
       }

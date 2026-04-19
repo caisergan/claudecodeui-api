@@ -182,6 +182,16 @@ export function normalizeMessage(raw, sessionId) {
       kind: 'complete',
     })];
   }
+  if (raw.type === 'thread_started' && raw.threadId) {
+    return [createNormalizedMessage({
+      id: baseId,
+      sessionId: raw.threadId,
+      timestamp: ts,
+      provider: PROVIDER,
+      kind: 'session_created',
+      newSessionId: raw.threadId,
+    })];
+  }
   if (raw.type === 'turn_failed') {
     return [createNormalizedMessage({
       id: baseId, sessionId, timestamp: ts, provider: PROVIDER,
