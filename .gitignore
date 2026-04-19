@@ -143,3 +143,6 @@ tasks/
 
 # Graphify Folders
 graphify-out/
+.graphify*
+
+.omx/
