@@ -48,6 +48,7 @@ import codexRoutes from './routes/codex.js';
 import geminiRoutes from './routes/gemini.js';
 import pluginsRoutes from './routes/plugins.js';
 import messagesRoutes from './routes/messages.js';
+import usageLimitsRoutes from './routes/usage-limits.js';
 import { createNormalizedMessage } from './providers/types.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, sessionNamesDb, applyCustomSessionNames } from './database/db.js';
@@ -267,10 +268,17 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Public health check endpoint (no authentication required)
 app.get('/health', (req, res) => {
+    const remoteAddress = req.socket?.remoteAddress || req.ip || '';
+    const isLoopback =
+        remoteAddress === '127.0.0.1' ||
+        remoteAddress === '::1' ||
+        remoteAddress === '::ffff:127.0.0.1';
+
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        installMode
+        installMode,
+        appInstallPath: isLoopback ? APP_ROOT : undefined
     });
 });
 
@@ -321,6 +329,9 @@ app.use('/api/plugins', authenticateToken, pluginsRoutes);
 
 // Unified session messages route (protected)
 app.use('/api/sessions', authenticateToken, messagesRoutes);
+
+// Usage-limit inspection route (protected)
+app.use('/api/usage-limits', authenticateToken, usageLimitsRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
