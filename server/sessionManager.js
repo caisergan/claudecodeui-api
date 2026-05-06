@@ -25,13 +25,14 @@ class SessionManager {
   }
 
   // Create a new session
-  createSession(sessionId, projectPath) {
+  createSession(sessionId, projectPath, metadata = {}) {
     const session = {
       id: sessionId,
       projectPath: projectPath,
       messages: [],
       createdAt: new Date(),
-      lastActivity: new Date()
+      lastActivity: new Date(),
+      ...metadata
     };
 
     // Evict oldest session from memory if we exceed limit
@@ -84,7 +85,9 @@ class SessionManager {
           id: session.id,
           summary: this.getSessionSummary(session),
           messageCount: session.messages.length,
-          lastActivity: session.lastActivity
+          lastActivity: session.lastActivity,
+          provider: session.provider || null,
+          model: session.model || null
         });
       }
     }

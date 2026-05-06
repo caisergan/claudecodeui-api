@@ -26,6 +26,7 @@ async function spawnGemini(command, options = {}, ws) {
         disallowedTools: [],
         skipPermissions: false
     };
+    const modelToUse = options.model || 'gemini-2.5-flash';
 
     // Build Gemini CLI command - start with print/resume flags first
     const args = [];
@@ -40,6 +41,9 @@ async function spawnGemini(command, options = {}, ws) {
         const session = sessionManager.getSession(sessionId);
         if (session && session.cliSessionId) {
             args.push('--resume', session.cliSessionId);
+            session.model = session.model || modelToUse;
+            session.provider = 'gemini';
+            sessionManager.saveSession(sessionId);
         }
     }
 
@@ -135,7 +139,6 @@ async function spawnGemini(command, options = {}, ws) {
     }
 
     // Add model for all sessions (both new and resumed)
-    let modelToUse = options.model || 'gemini-2.5-flash';
     args.push('--model', modelToUse);
     args.push('--output-format', 'stream-json');
 
@@ -280,6 +283,8 @@ async function spawnGemini(command, options = {}, ws) {
                         const sess = sessionManager.getSession(capturedSessionId);
                         if (sess && !sess.cliSessionId) {
                             sess.cliSessionId = event.session_id;
+                            sess.model = sess.model || modelToUse;
+                            sess.provider = 'gemini';
                             sessionManager.saveSession(capturedSessionId);
                         }
                     }
@@ -298,7 +303,10 @@ async function spawnGemini(command, options = {}, ws) {
                 sessionCreatedSent = true;
 
                 // Create session in session manager
-                sessionManager.createSession(capturedSessionId, cwd || process.cwd());
+                sessionManager.createSession(capturedSessionId, cwd || process.cwd(), {
+                    provider: 'gemini',
+                    model: modelToUse
+                });
 
                 // Save the user message now that we have a session ID
                 if (command) {
