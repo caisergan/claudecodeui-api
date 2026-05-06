@@ -494,6 +494,16 @@ export class CodexSessionsProvider implements IProviderSessions {
         kind: 'complete',
       })];
     }
+    if (raw.type === 'thread_started' && raw.threadId) {
+      return [createNormalizedMessage({
+        id: baseId,
+        sessionId: raw.threadId as string,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'session_created',
+        newSessionId: raw.threadId as string,
+      })];
+    }
     if (raw.type === 'turn_failed') {
       return [createNormalizedMessage({
         id: baseId,
