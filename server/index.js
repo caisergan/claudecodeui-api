@@ -64,6 +64,7 @@ import projectModuleRoutes from './modules/projects/projects.routes.js';
 import userRoutes from './routes/user.js';
 import geminiRoutes from './routes/gemini.js';
 import pluginsRoutes from './routes/plugins.js';
+import usageLimitsRoutes from './routes/usage-limits.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, projectsDb } from './modules/database/index.js';
@@ -184,6 +185,9 @@ app.use('/api/plugins', authenticateToken, pluginsRoutes);
 
 // Unified provider MCP routes (protected)
 app.use('/api/providers', authenticateToken, providerRoutes);
+
+// Usage-limit inspection route (protected)
+app.use('/api/usage-limits', authenticateToken, usageLimitsRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
