@@ -10,8 +10,10 @@ import { spawnCursor } from '../cursor-cli.js';
 import { queryCodex } from '../openai-codex.js';
 import { spawnGemini } from '../gemini-cli.js';
 import { Octokit } from '@octokit/rest';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '../../shared/modelConstants.js';
+import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../shared/modelConstants.js';
 import { IS_PLATFORM } from '../constants/config.js';
+import { getProjectsWithSessions, getProjectSessionsPage } from '../modules/projects/services/projects-with-sessions-fetch.service.js';
+import { sessionsService } from '../modules/providers/services/sessions.service.js';
 import { normalizeProjectPath } from '../shared/utils.js';
 
 const router = express.Router();
@@ -60,6 +62,121 @@ const validateExternalApiKey = (req, res, next) => {
   req.user = user;
   next();
 };
+
+const VALID_PROVIDERS = ['claude', 'cursor', 'codex', 'gemini'];
+const SAFE_SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,200}$/;
+const PROVIDER_METADATA = {
+  claude: { providerLabel: 'Claude', providerIcon: '/icons/claude-ai-icon.svg', providerIconDark: '/icons/claude-ai-icon.svg' },
+  cursor: { providerLabel: 'Cursor', providerIcon: '/icons/cursor.svg', providerIconDark: '/icons/cursor-white.svg' },
+  codex: { providerLabel: 'Codex', providerIcon: '/icons/codex.svg', providerIconDark: '/icons/codex-white.svg' },
+  gemini: { providerLabel: 'Gemini', providerIcon: '/icons/gemini-ai-icon.svg', providerIconDark: '/icons/gemini-ai-icon.svg' },
+};
+const MODEL_REGISTRIES = { claude: CLAUDE_MODELS, cursor: CURSOR_MODELS, codex: CODEX_MODELS, gemini: GEMINI_MODELS };
+
+function parseOptionalPositiveInt(value, { defaultValue = null, max = 500 } = {}) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  const parsed = Number.parseInt(String(value), 10);
+  if (Number.isNaN(parsed) || parsed < 0) return defaultValue;
+  return Math.min(parsed, max);
+}
+
+function inferModelProvider(provider, model) {
+  if (!model || typeof model !== 'string') {
+    return provider === 'claude' ? 'anthropic' : provider === 'codex' ? 'openai' : provider === 'gemini' ? 'google' : 'cursor';
+  }
+  const n = model.toLowerCase();
+  if (n.startsWith('claude') || n.startsWith('sonnet') || n.startsWith('opus') || n.startsWith('haiku')) return 'anthropic';
+  if (n.startsWith('gpt') || n.startsWith('o1') || n.startsWith('o3') || n.startsWith('o4') || n.includes('codex')) return 'openai';
+  if (n.startsWith('gemini')) return 'google';
+  if (n.startsWith('grok')) return 'xai';
+  if (n.startsWith('auto') || n.startsWith('composer')) return 'cursor';
+  return provider;
+}
+
+function resolveModelLabel(provider, model) {
+  if (!model || typeof model !== 'string') return null;
+  const registry = MODEL_REGISTRIES[provider];
+  const match = registry?.OPTIONS?.find(o => o.value === model);
+  return match?.label || model.replace(/\[1m\]/gi, '[1M]').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function decorateSession(session, provider) {
+  const p = provider || session.provider || 'claude';
+  const info = PROVIDER_METADATA[p] || PROVIDER_METADATA.claude;
+  const model = typeof session.model === 'string' && session.model.trim() ? session.model : null;
+  return { ...session, provider: p, ...info, model, modelLabel: resolveModelLabel(p, model), modelProvider: session.modelProvider || inferModelProvider(p, model) };
+}
+
+function decorateProject(project) {
+  return {
+    ...project,
+    sessions: (project.sessions || []).map(s => decorateSession(s, 'claude')),
+    cursorSessions: (project.cursorSessions || []).map(s => decorateSession(s, 'cursor')),
+    codexSessions: (project.codexSessions || []).map(s => decorateSession(s, 'codex')),
+    geminiSessions: (project.geminiSessions || []).map(s => decorateSession(s, 'gemini')),
+  };
+}
+
+router.get('/projects', validateExternalApiKey, async (req, res) => {
+  try {
+    const raw = await getProjectsWithSessions({ skipSynchronization: false });
+    const projects = raw.map(decorateProject);
+    res.json({ success: true, projects });
+  } catch (error) {
+    console.error('Error fetching external API projects:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch projects' });
+  }
+});
+
+router.get('/projects/:projectId/sessions', validateExternalApiKey, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const provider = String(req.query.provider || 'claude');
+    if (!VALID_PROVIDERS.includes(provider)) {
+      return res.status(400).json({ success: false, error: `Unknown provider: ${provider}. Available: ${VALID_PROVIDERS.join(', ')}` });
+    }
+    const offset = parseOptionalPositiveInt(req.query.offset, { defaultValue: 0, max: 10000 });
+    const limit = parseOptionalPositiveInt(req.query.limit, { defaultValue: 20, max: 200 });
+
+    const page = await getProjectSessionsPage(projectId, { limit, offset });
+    const providerKey = provider === 'claude' ? 'sessions' : `${provider}Sessions`;
+    const allSessions = (page[providerKey] || []).map(s => decorateSession(s, provider));
+
+    res.json({
+      success: true,
+      provider,
+      providerInfo: PROVIDER_METADATA[provider],
+      projectId,
+      sessions: allSessions,
+      total: page.sessionMeta?.total ?? allSessions.length,
+      offset,
+      limit,
+      hasMore: page.sessionMeta?.hasMore ?? false,
+    });
+  } catch (error) {
+    console.error('Error fetching external API sessions:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ success: false, error: error.message || 'Failed to fetch sessions' });
+  }
+});
+
+router.get('/sessions/:sessionId/messages', validateExternalApiKey, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    if (!SAFE_SESSION_ID_PATTERN.test(sessionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid sessionId' });
+    }
+    const limit = parseOptionalPositiveInt(req.query.limit, { defaultValue: null, max: 500 });
+    const offset = parseOptionalPositiveInt(req.query.offset, { defaultValue: 0, max: 10000 });
+
+    const result = await sessionsService.fetchHistory(sessionId, { limit, offset });
+    res.json({ success: true, sessionId, ...result });
+  } catch (error) {
+    console.error('Error fetching external API session messages:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ success: false, error: error.message || 'Failed to fetch session messages' });
+  }
+});
 
 /**
  * Get the remote URL of a git repository
