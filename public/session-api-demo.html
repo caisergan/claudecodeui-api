@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudCLI Session API Demo</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #121933;
+      --panel-border: rgba(148, 163, 184, 0.18);
+      --panel-soft: #0f172a;
+      --accent: #60a5fa;
+      --accent-soft: rgba(96, 165, 250, 0.14);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --success: #22c55e;
+      --danger: #f87171;
+      --warning: #fbbf24;
+      --bubble-user: #1d4ed8;
+      --bubble-assistant: #1f2937;
+      --bubble-meta: #111827;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.16), transparent 24rem),
+        radial-gradient(circle at top right, rgba(34, 197, 94, 0.1), transparent 24rem),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .shell {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      margin: 0 0 0.5rem;
+      font-size: 2rem;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 60rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--panel-border);
+      border-radius: 20px;
+      box-shadow: 0 24px 80px rgba(2, 8, 23, 0.35);
+      backdrop-filter: blur(14px);
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1.3fr 1.3fr auto auto;
+      gap: 0.75rem;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    input,
+    textarea,
+    button {
+      font: inherit;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.9);
+      color: var(--text);
+      padding: 0.8rem 0.9rem;
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 0.9rem 1rem;
+      background: linear-gradient(135deg, #2563eb, #60a5fa);
+      color: white;
+      cursor: pointer;
+      font-weight: 600;
+      align-self: end;
+    }
+
+    button.secondary {
+      background: rgba(148, 163, 184, 0.12);
+      color: var(--text);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.8rem 1rem 1rem;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .status strong {
+      color: var(--text);
+    }
+
+    .status .ok {
+      color: var(--success);
+    }
+
+    .status .error {
+      color: var(--danger);
+    }
+
+    .status .warn {
+      color: var(--warning);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 290px 360px minmax(0, 1fr);
+      gap: 1rem;
+    }
+
+    .panel {
+      min-height: 68vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 1rem 1rem 0.75rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .panel-header h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .panel-header p {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .list {
+      padding: 0.75rem;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .list button {
+      width: 100%;
+      text-align: left;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      padding: 0.85rem 0.95rem;
+    }
+
+    .list button.active {
+      border-color: rgba(96, 165, 250, 0.6);
+      background: var(--accent-soft);
+    }
+
+    .item-title {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+
+    .provider-icon {
+      width: 16px;
+      height: 16px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+
+    .item-meta {
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.4rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(15, 23, 42, 0.85);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 0.18rem 0.5rem;
+      font-size: 0.74rem;
+      line-height: 1.2;
+    }
+
+    .empty-state {
+      padding: 1rem;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .conversation {
+      min-height: 68vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .conversation-meta {
+      padding: 1rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+
+    .conversation-meta h2 {
+      margin: 0 0 0.3rem;
+      font-size: 1.05rem;
+    }
+
+    .conversation-meta p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+
+    .messages {
+      padding: 1rem;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      flex: 1;
+    }
+
+    .message {
+      max-width: 92%;
+      border-radius: 16px;
+      padding: 0.85rem 1rem;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      background: var(--bubble-meta);
+      white-space: pre-wrap;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: rgba(37, 99, 235, 0.35);
+      border-color: rgba(96, 165, 250, 0.34);
+    }
+
+    .message.assistant {
+      background: rgba(31, 41, 55, 0.9);
+    }
+
+    .message.meta {
+      background: rgba(15, 23, 42, 0.95);
+      border-style: dashed;
+    }
+
+    .message.error {
+      border-color: rgba(248, 113, 113, 0.35);
+      background: rgba(127, 29, 29, 0.45);
+    }
+
+    .message-header {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 0.5rem;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .composer {
+      padding: 1rem;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .composer-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .hint {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    @media (max-width: 1200px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .panel,
+      .conversation {
+        min-height: auto;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <div>
+        <h1>Claude Session API Demo</h1>
+        <p>
+          This is a minimal app built on top of the external CloudCLI API. It uses API-key-authenticated
+          project discovery, Claude session listing, normalized message history, and session resume via
+          <code>POST /api/agent</code>.
+        </p>
+      </div>
+      <a href="/api-docs.html">Open API docs →</a>
+    </div>
+
+    <div class="card">
+      <div class="controls">
+        <label>
+          Base URL
+          <input id="baseUrl" value="" />
+        </label>
+        <label>
+          API key
+          <input id="apiKey" type="password" placeholder="ck_..." />
+        </label>
+        <button id="loadProjectsButton">Load projects</button>
+        <button id="clearButton" class="secondary">Clear state</button>
+      </div>
+      <div class="status">
+        <div id="statusText"><strong>Status:</strong> Enter an API key, then load projects.</div>
+        <div class="hint">Flow: projects → Claude sessions → history → resume session</div>
+      </div>
+    </div>
+
+    <div class="layout" style="margin-top: 1rem;">
+      <section class="card panel">
+        <div class="panel-header">
+          <h2>Projects</h2>
+          <p>Discovered from CloudCLI's local session index.</p>
+        </div>
+        <div class="list" id="projectsList"></div>
+      </section>
+
+      <section class="card panel">
+        <div class="panel-header">
+          <h2>Claude Sessions</h2>
+          <p>Fetched from the external session API for the selected project.</p>
+        </div>
+        <div class="list" id="sessionsList"></div>
+      </section>
+
+      <section class="card conversation">
+        <div class="conversation-meta">
+          <div>
+            <h2 id="conversationTitle">No session selected</h2>
+            <p id="conversationSubtitle">Pick a project, then select a Claude session to read and resume it.</p>
+          </div>
+          <button id="refreshMessagesButton" class="secondary" disabled>Refresh history</button>
+        </div>
+        <div class="messages" id="messages"></div>
+        <form class="composer" id="replyForm">
+          <textarea id="replyInput" placeholder="Send a follow-up into the selected Claude session..." disabled></textarea>
+          <div class="composer-actions">
+            <div class="hint" id="composerHint">Resuming uses the selected project's path and the selected session's ID.</div>
+            <button id="sendReplyButton" type="submit" disabled>Resume session</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      baseUrl: window.location.origin,
+      apiKey: '',
+      projects: [],
+      sessionsByProject: new Map(),
+      selectedProject: null,
+      selectedSession: null,
+      isBusy: false,
+    };
+
+    const elements = {
+      apiKey: document.getElementById('apiKey'),
+      baseUrl: document.getElementById('baseUrl'),
+      clearButton: document.getElementById('clearButton'),
+      conversationSubtitle: document.getElementById('conversationSubtitle'),
+      conversationTitle: document.getElementById('conversationTitle'),
+      loadProjectsButton: document.getElementById('loadProjectsButton'),
+      messages: document.getElementById('messages'),
+      projectsList: document.getElementById('projectsList'),
+      refreshMessagesButton: document.getElementById('refreshMessagesButton'),
+      replyForm: document.getElementById('replyForm'),
+      replyInput: document.getElementById('replyInput'),
+      sendReplyButton: document.getElementById('sendReplyButton'),
+      sessionsList: document.getElementById('sessionsList'),
+      statusText: document.getElementById('statusText'),
+    };
+
+    elements.baseUrl.value = state.baseUrl;
+
+    function setStatus(message, tone = 'info') {
+      const toneClass = tone === 'error' ? 'error' : tone === 'success' ? 'ok' : tone === 'warn' ? 'warn' : '';
+      elements.statusText.innerHTML = `<strong>Status:</strong> <span class="${toneClass}">${message}</span>`;
+    }
+
+    function setBusy(isBusy) {
+      state.isBusy = isBusy;
+      elements.loadProjectsButton.disabled = isBusy;
+      elements.refreshMessagesButton.disabled = isBusy || !state.selectedSession;
+      elements.sendReplyButton.disabled = isBusy || !state.selectedSession || !elements.replyInput.value.trim();
+      elements.replyInput.disabled = isBusy || !state.selectedSession;
+    }
+
+    function getBaseUrl() {
+      return (elements.baseUrl.value || window.location.origin).replace(/\/+$/, '');
+    }
+
+    async function apiFetch(path, options = {}) {
+      const apiKey = elements.apiKey.value.trim();
+      if (!apiKey) {
+        throw new Error('API key is required');
+      }
+
+      const response = await fetch(`${getBaseUrl()}${path}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+          ...(options.headers || {}),
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+
+      return payload;
+    }
+
+    function formatDate(value) {
+      if (!value) return 'Unknown activity';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function getProviderMeta(session) {
+      return {
+        label: session.providerLabel || session.provider || 'Claude',
+        icon: session.providerIcon || '/icons/claude-ai-icon.svg',
+        modelLabel: session.modelLabel || session.model || null,
+        modelProvider: session.modelProvider || null,
+      };
+    }
+
+    function getProjectClaudeSessions(project) {
+      return state.sessionsByProject.get(project.name) || project.sessions || [];
+    }
+
+    function renderProjects() {
+      elements.projectsList.innerHTML = '';
+
+      if (state.projects.length === 0) {
+        elements.projectsList.innerHTML = '<div class="empty-state">No projects loaded yet.</div>';
+        return;
+      }
+
+      state.projects.forEach(project => {
+        const button = document.createElement('button');
+        const claudeTotal = project.sessionMeta?.total ?? project.sessions?.length ?? 0;
+        button.className = state.selectedProject?.name === project.name ? 'active' : '';
+        button.innerHTML = `
+          <div class="item-title">${project.displayName || project.name}</div>
+          <div class="item-meta">${project.path || 'No path'}<br>Claude sessions: ${claudeTotal}</div>
+        `;
+        button.addEventListener('click', () => selectProject(project));
+        elements.projectsList.appendChild(button);
+      });
+    }
+
+    function renderSessions() {
+      elements.sessionsList.innerHTML = '';
+
+      if (!state.selectedProject) {
+        elements.sessionsList.innerHTML = '<div class="empty-state">Select a project first.</div>';
+        return;
+      }
+
+      const sessions = getProjectClaudeSessions(state.selectedProject);
+      if (sessions.length === 0) {
+        elements.sessionsList.innerHTML = '<div class="empty-state">No Claude sessions found for this project.</div>';
+        return;
+      }
+
+      sessions.forEach(session => {
+        const button = document.createElement('button');
+        const providerMeta = getProviderMeta(session);
+        button.className = state.selectedSession?.id === session.id ? 'active' : '';
+        button.innerHTML = `
+          <div class="item-title">
+            <img class="provider-icon" src="${escapeHtml(providerMeta.icon)}" alt="${escapeHtml(providerMeta.label)}" />
+            <span>${escapeHtml(session.summary || session.id)}</span>
+          </div>
+          <div class="item-meta">${escapeHtml(session.id)}<br>${escapeHtml(formatDate(session.lastActivity))}</div>
+          <div class="pills">
+            <span class="pill">${escapeHtml(providerMeta.label)}</span>
+            ${providerMeta.modelLabel ? `<span class="pill">${escapeHtml(providerMeta.modelLabel)}</span>` : ''}
+            ${providerMeta.modelProvider ? `<span class="pill">${escapeHtml(providerMeta.modelProvider)}</span>` : ''}
+          </div>
+        `;
+        button.addEventListener('click', () => selectSession(session));
+        elements.sessionsList.appendChild(button);
+      });
+    }
+
+    function getMessageRole(message) {
+      if (message.kind === 'text') {
+        return message.role === 'user' ? 'user' : 'assistant';
+      }
+      if (message.kind === 'error') {
+        return 'error';
+      }
+      return 'meta';
+    }
+
+    function getMessageBody(message) {
+      if (message.kind === 'text') {
+        return message.content || '';
+      }
+      if (message.kind === 'thinking') {
+        return message.content || '';
+      }
+      if (message.kind === 'tool_use') {
+        return `${message.toolName || 'Tool'}\n${JSON.stringify(message.toolInput || {}, null, 2)}`;
+      }
+      if (message.kind === 'tool_result') {
+        return message.content || '';
+      }
+      if (message.kind === 'status') {
+        return message.text || message.content || '';
+      }
+      if (message.kind === 'complete') {
+        return `exitCode=${message.exitCode ?? 0}`;
+      }
+      return message.content || message.text || JSON.stringify(message, null, 2);
+    }
+
+    function renderMessages(messages = []) {
+      elements.messages.innerHTML = '';
+
+      if (!state.selectedSession) {
+        elements.messages.innerHTML = '<div class="empty-state">Select a Claude session to view history.</div>';
+        return;
+      }
+
+      if (messages.length === 0) {
+        elements.messages.innerHTML = '<div class="empty-state">This session has no readable messages yet.</div>';
+        return;
+      }
+
+      messages.forEach(message => {
+        const role = getMessageRole(message);
+        const wrapper = document.createElement('div');
+        wrapper.className = `message ${role}`;
+
+        const header = document.createElement('div');
+        header.className = 'message-header';
+        header.textContent = `${message.kind}${message.role ? ` · ${message.role}` : ''} · ${formatDate(message.timestamp)}`;
+
+        const body = document.createElement('div');
+        body.textContent = getMessageBody(message);
+
+        wrapper.appendChild(header);
+        wrapper.appendChild(body);
+        elements.messages.appendChild(wrapper);
+      });
+
+      elements.messages.scrollTop = elements.messages.scrollHeight;
+    }
+
+    async function loadProjects() {
+      setBusy(true);
+      setStatus('Loading projects from /api/agent/projects ...');
+
+      try {
+        const result = await apiFetch('/api/agent/projects');
+        state.projects = result.projects || [];
+        state.sessionsByProject.clear();
+        state.selectedProject = null;
+        state.selectedSession = null;
+        renderProjects();
+        renderSessions();
+        renderMessages();
+        elements.conversationTitle.textContent = 'No session selected';
+        elements.conversationSubtitle.textContent = 'Pick a project, then select a Claude session to read and resume it.';
+        setStatus(`Loaded ${state.projects.length} project(s).`, 'success');
+      } catch (error) {
+        setStatus(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function selectProject(project) {
+      state.selectedProject = project;
+      state.selectedSession = null;
+      renderProjects();
+      renderSessions();
+      renderMessages();
+
+      elements.conversationTitle.textContent = project.displayName || project.name;
+      elements.conversationSubtitle.textContent = `${project.path} · Loading Claude sessions ...`;
+
+      setBusy(true);
+      try {
+        const result = await apiFetch(`/api/agent/projects/${encodeURIComponent(project.name)}/sessions?provider=claude&limit=200&offset=0`);
+        state.sessionsByProject.set(project.name, result.sessions || []);
+        renderSessions();
+        elements.conversationSubtitle.textContent = `${project.path} · ${result.total ?? (result.sessions || []).length} Claude session(s)`;
+        setStatus(`Loaded Claude sessions for ${project.displayName || project.name}.`, 'success');
+      } catch (error) {
+        elements.conversationSubtitle.textContent = `${project.path} · Failed to load Claude sessions`;
+        setStatus(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function selectSession(session) {
+      state.selectedSession = session;
+      renderSessions();
+      await refreshMessages();
+    }
+
+    async function refreshMessages() {
+      if (!state.selectedProject || !state.selectedSession) {
+        return;
+      }
+
+      setBusy(true);
+      elements.conversationTitle.textContent = state.selectedSession.summary || state.selectedSession.id;
+      const providerMeta = getProviderMeta(state.selectedSession);
+      elements.conversationSubtitle.textContent = [
+        state.selectedProject.displayName || state.selectedProject.name,
+        state.selectedSession.id,
+        providerMeta.label,
+        providerMeta.modelLabel,
+        providerMeta.modelProvider,
+      ].filter(Boolean).join(' · ');
+      setStatus(`Loading history for ${state.selectedSession.id} ...`);
+
+      try {
+        const result = await apiFetch(
+          `/api/agent/sessions/${encodeURIComponent(state.selectedSession.id)}/messages?provider=claude&projectName=${encodeURIComponent(state.selectedProject.name)}`
+        );
+        renderMessages(result.messages || []);
+        setStatus(`Loaded ${result.total ?? (result.messages || []).length} normalized message(s).`, 'success');
+      } catch (error) {
+        renderMessages();
+        setStatus(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function sendReply(event) {
+      event.preventDefault();
+
+      if (!state.selectedProject || !state.selectedSession) {
+        return;
+      }
+
+      const message = elements.replyInput.value.trim();
+      if (!message) {
+        return;
+      }
+
+      setBusy(true);
+      setStatus(`Resuming Claude session ${state.selectedSession.id} ...`);
+
+      try {
+        const result = await apiFetch('/api/agent', {
+          method: 'POST',
+          body: JSON.stringify({
+            provider: 'claude',
+            projectPath: state.selectedProject.path,
+            sessionId: state.selectedSession.id,
+            message,
+            stream: false,
+          }),
+        });
+
+        elements.replyInput.value = '';
+        await refreshMessages();
+        const resumedSessionId = result.sessionId || state.selectedSession.id;
+        setStatus(`Claude session resumed successfully (${resumedSessionId}).`, 'success');
+      } catch (error) {
+        setStatus(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function resetState() {
+      state.projects = [];
+      state.sessionsByProject.clear();
+      state.selectedProject = null;
+      state.selectedSession = null;
+      elements.replyInput.value = '';
+      renderProjects();
+      renderSessions();
+      renderMessages();
+      elements.conversationTitle.textContent = 'No session selected';
+      elements.conversationSubtitle.textContent = 'Pick a project, then select a Claude session to read and resume it.';
+      setStatus('State cleared.');
+      setBusy(false);
+    }
+
+    elements.loadProjectsButton.addEventListener('click', loadProjects);
+    elements.refreshMessagesButton.addEventListener('click', refreshMessages);
+    elements.clearButton.addEventListener('click', resetState);
+    elements.replyForm.addEventListener('submit', sendReply);
+    elements.replyInput.addEventListener('input', () => {
+      elements.sendReplyButton.disabled = state.isBusy || !state.selectedSession || !elements.replyInput.value.trim();
+    });
+
+    renderProjects();
+    renderSessions();
+    renderMessages();
+  </script>
+</body>
+</html>
