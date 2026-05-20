@@ -650,6 +650,8 @@ class ResponseCollector {
    */
   getAssistantMessages() {
     const assistantMessages = [];
+    const streamDeltaContent = [];
+    let streamDeltaProvider = null;
 
     for (const msg of this.messages) {
       // Skip initial status message
@@ -657,18 +659,36 @@ class ResponseCollector {
         continue;
       }
 
-      // Handle JSON strings
+      // Handle JSON strings (Claude provider's stringified events)
       if (typeof msg === 'string') {
         try {
           const parsed = JSON.parse(msg);
-          // Only include claude-response messages with assistant type
           if (parsed.type === 'claude-response' && parsed.data && parsed.data.type === 'assistant') {
             assistantMessages.push(parsed.data);
           }
         } catch (e) {
           // Not JSON, skip
         }
+        continue;
       }
+
+      // Handle normalized message objects (Gemini, Cursor, Codex emit stream_delta).
+      // Accumulate content; we synthesize a single assistant message after the loop.
+      if (msg && typeof msg === 'object' && msg.kind === 'stream_delta' && typeof msg.content === 'string') {
+        streamDeltaContent.push(msg.content);
+        if (!streamDeltaProvider && msg.provider) {
+          streamDeltaProvider = msg.provider;
+        }
+      }
+    }
+
+    if (streamDeltaContent.length > 0) {
+      assistantMessages.push({
+        type: 'assistant',
+        role: 'assistant',
+        content: streamDeltaContent.join(''),
+        provider: streamDeltaProvider || 'unknown',
+      });
     }
 
     return assistantMessages;

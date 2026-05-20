@@ -142,6 +142,12 @@ async function spawnGemini(command, options = {}, ws) {
     args.push('--model', modelToUse);
     args.push('--output-format', 'stream-json');
 
+    // Trust the workspace for this headless session. Without this, Gemini CLI
+    // exits with code 55 ("Gemini CLI is not running in a trusted directory")
+    // for any directory the user has not interactively trusted, which is the
+    // common case for ephemeral project paths created by API callers.
+    args.push('--skip-trust');
+
     // Handle approval modes and allowed tools
     if (settings.skipPermissions || options.skipPermissions || permissionMode === 'yolo') {
         args.push('--yolo');
