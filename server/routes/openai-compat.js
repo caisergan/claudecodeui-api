@@ -1,9 +1,8 @@
 import express from 'express';
 import crypto from 'crypto';
 import os from 'os';
-import { apiKeysDb } from '../modules/database/index.js';
+import { apiKeysDb, userDb } from '../modules/database/index.js';
 import { IS_PLATFORM } from '../constants/config.js';
-import { userDb } from '../modules/database/index.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
 import { queryCodex } from '../openai-codex.js';
 import { spawnGemini } from '../gemini-cli.js';
@@ -44,6 +43,9 @@ function formatMessages(messages) {
       : msg.role;
     parts.push(`[${label}] ${msg.content}`);
   }
+  if (parts.length === 0) {
+    return { error: 'No valid messages found (each message must have role and content)' };
+  }
   return { prompt: parts.join('\n\n') };
 }
 
@@ -53,12 +55,16 @@ function makeErrorResponse(message, type, code) {
 
 function validateOpenAIAuth(req, res, next) {
   if (IS_PLATFORM) {
-    const user = userDb.getFirstUser();
-    if (user) {
-      req.user = user;
-      return next();
+    try {
+      const user = userDb.getFirstUser();
+      if (user) {
+        req.user = user;
+        return next();
+      }
+      return res.status(500).json(makeErrorResponse('No users configured', 'server_error', 500));
+    } catch (err) {
+      return res.status(500).json(makeErrorResponse(err.message || 'Failed to retrieve user', 'server_error', 500));
     }
-    return res.status(401).json(makeErrorResponse('No users configured', 'authentication_error', 401));
   }
 
   let apiKey = req.headers['x-api-key'];
@@ -159,6 +165,7 @@ class OpenAICompatWriter {
   }
 
   _writeSSEChunk(delta) {
+    if (this.res.writableEnded) return;
     const chunk = {
       id: this.completionId,
       object: 'chat.completion.chunk',
@@ -177,9 +184,18 @@ class OpenAICompatWriter {
 
   finalize() {
     if (this.stream) {
-      this._writeSSEChunk({ finish_reason: 'stop' });
-      this.res.write('data: [DONE]\n\n');
-      this.res.end();
+      if (!this.res.writableEnded) {
+        const finalChunk = {
+          id: this.completionId,
+          object: 'chat.completion.chunk',
+          created: this.created,
+          model: this.model,
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        };
+        this.res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+        this.res.write('data: [DONE]\n\n');
+        this.res.end();
+      }
     } else {
       const content = this.contentParts.join('');
       const response = {
@@ -228,6 +244,9 @@ router.post('/chat/completions', validateOpenAIAuth, async (req, res) => {
 
   req.on('close', () => {
     abortController.abort();
+    if (!res.writableEnded) {
+      res.end();
+    }
   });
 
   const cwd = os.tmpdir();
@@ -253,10 +272,12 @@ router.post('/chat/completions', validateOpenAIAuth, async (req, res) => {
   } catch (err) {
     if (abortController.signal.aborted) return;
     if (stream) {
-      const errorChunk = { error: { message: err.message || 'Agent execution failed', type: 'server_error', code: 500 } };
-      res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
-      res.write('data: [DONE]\n\n');
-      res.end();
+      if (!res.writableEnded) {
+        const errorChunk = { error: { message: err.message || 'Agent execution failed', type: 'server_error', code: 500 } };
+        res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      }
     } else {
       if (!res.headersSent) {
         res.status(500).json(makeErrorResponse(err.message || 'Agent execution failed', 'server_error', 500));
