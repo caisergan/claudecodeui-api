@@ -51,4 +51,32 @@ function makeErrorResponse(message, type, code) {
   return { error: { message, type, code } };
 }
 
+function validateOpenAIAuth(req, res, next) {
+  if (IS_PLATFORM) {
+    const user = userDb.getFirstUser();
+    if (user) {
+      req.user = user;
+      return next();
+    }
+    return res.status(401).json(makeErrorResponse('No users configured', 'authentication_error', 401));
+  }
+
+  let apiKey = req.headers['x-api-key'];
+  if (!apiKey) {
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      apiKey = authHeader.slice(7);
+    }
+  }
+  if (!apiKey) {
+    return res.status(401).json(makeErrorResponse('API key required. Use Authorization: Bearer <key> or X-API-Key header', 'authentication_error', 401));
+  }
+  const user = apiKeysDb.validateApiKey(apiKey);
+  if (!user) {
+    return res.status(401).json(makeErrorResponse('Invalid API key', 'authentication_error', 401));
+  }
+  req.user = user;
+  next();
+}
+
 export { router as openaiCompatRouter, parseModel, formatMessages, makeErrorResponse };
