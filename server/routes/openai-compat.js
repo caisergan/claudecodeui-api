@@ -105,12 +105,28 @@ class OpenAICompatWriter {
 
     this._extractTokens(data);
 
-    if (kind === 'text' && role === 'assistant' && data.content) {
-      this.contentParts.push(data.content);
-    }
-
-    if (kind === 'stream_delta' && typeof data.content === 'string') {
-      this.contentParts.push(data.content);
+    if (this.stream) {
+      let content = null;
+      if (kind === 'stream_delta' && typeof data.content === 'string') {
+        content = data.content;
+      } else if (kind === 'text' && role === 'assistant' && data.content) {
+        content = data.content;
+      }
+      if (content !== null) {
+        if (!this.sentRole) {
+          this._writeSSEChunk({ role: 'assistant', content });
+          this.sentRole = true;
+        } else {
+          this._writeSSEChunk({ content });
+        }
+      }
+    } else {
+      if (kind === 'text' && role === 'assistant' && data.content) {
+        this.contentParts.push(data.content);
+      }
+      if (kind === 'stream_delta' && typeof data.content === 'string') {
+        this.contentParts.push(data.content);
+      }
     }
   }
 
@@ -142,23 +158,44 @@ class OpenAICompatWriter {
     return this.sessionId;
   }
 
-  end() {}
-
-  finalize() {
-    const content = this.contentParts.join('');
-    const response = {
+  _writeSSEChunk(delta) {
+    const chunk = {
       id: this.completionId,
-      object: 'chat.completion',
+      object: 'chat.completion.chunk',
       created: this.created,
       model: this.model,
       choices: [{
         index: 0,
-        message: { role: 'assistant', content },
-        finish_reason: 'stop',
+        delta,
+        finish_reason: null,
       }],
-      usage: this.tokenUsage || null,
     };
-    this.res.json(response);
+    this.res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+
+  end() {}
+
+  finalize() {
+    if (this.stream) {
+      this._writeSSEChunk({ finish_reason: 'stop' });
+      this.res.write('data: [DONE]\n\n');
+      this.res.end();
+    } else {
+      const content = this.contentParts.join('');
+      const response = {
+        id: this.completionId,
+        object: 'chat.completion',
+        created: this.created,
+        model: this.model,
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content },
+          finish_reason: 'stop',
+        }],
+        usage: this.tokenUsage || null,
+      };
+      this.res.json(response);
+    }
   }
 }
 
