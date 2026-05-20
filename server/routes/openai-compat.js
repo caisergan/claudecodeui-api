@@ -215,6 +215,19 @@ class OpenAICompatWriter {
   }
 }
 
+router.get('/models', validateOpenAIAuth, (req, res) => {
+  const models = [];
+  for (const provider of VALID_PROVIDERS) {
+    models.push({
+      id: `${provider}:default`,
+      object: 'model',
+      created: Math.floor(Date.now() / 1000),
+      owned_by: provider,
+    });
+  }
+  res.json({ object: 'list', data: models });
+});
+
 router.post('/chat/completions', validateOpenAIAuth, async (req, res) => {
   const { model: modelString, messages, stream = false } = req.body;
 
