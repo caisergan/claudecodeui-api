@@ -242,10 +242,9 @@ router.post('/chat/completions', validateOpenAIAuth, async (req, res) => {
   const writer = new OpenAICompatWriter(res, { model: modelString, stream });
   writer.userId = req.user?.id;
 
-  req.on('close', () => {
-    abortController.abort();
-    if (!res.writableEnded) {
-      res.end();
+  res.on('close', () => {
+    if (!res.writableFinished) {
+      abortController.abort();
     }
   });
 
