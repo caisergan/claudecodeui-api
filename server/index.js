@@ -66,6 +66,7 @@ import geminiRoutes from './routes/gemini.js';
 import pluginsRoutes from './routes/plugins.js';
 import usageLimitsRoutes from './routes/usage-limits.js';
 import providerRoutes from './modules/providers/provider.routes.js';
+import { openaiCompatRouter } from './routes/openai-compat.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, projectsDb } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
@@ -191,6 +192,9 @@ app.use('/api/usage-limits', authenticateToken, usageLimitsRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
+
+// OpenAI-compatible chat completions proxy (uses API key authentication)
+app.use('/v1', openaiCompatRouter);
 
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(APP_ROOT, 'public')));
