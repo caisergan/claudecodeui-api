@@ -79,4 +79,87 @@ function validateOpenAIAuth(req, res, next) {
   next();
 }
 
+class OpenAICompatWriter {
+  constructor(res, { model, stream = false }) {
+    this.res = res;
+    this.model = model;
+    this.stream = stream;
+    this.sessionId = null;
+    this.userId = null;
+    this.contentParts = [];
+    this.tokenUsage = null;
+    this.completionId = `chatcmpl-${crypto.randomUUID()}`;
+    this.created = Math.floor(Date.now() / 1000);
+    this.sentRole = false;
+  }
+
+  send(data) {
+    if (!data || typeof data !== 'object') return;
+
+    const kind = data.kind;
+    const role = data.role;
+
+    if (data.sessionId && !this.sessionId) {
+      this.sessionId = data.sessionId;
+    }
+
+    this._extractTokens(data);
+
+    if (kind === 'text' && role === 'assistant' && data.content) {
+      this.contentParts.push(data.content);
+    }
+
+    if (kind === 'stream_delta' && typeof data.content === 'string') {
+      this.contentParts.push(data.content);
+    }
+  }
+
+  _extractTokens(data) {
+    if (data.modelUsage) {
+      const u = data.modelUsage;
+      this.tokenUsage = {
+        prompt_tokens: u.cumulativeInputTokens || 0,
+        completion_tokens: u.cumulativeOutputTokens || 0,
+        total_tokens: (u.cumulativeInputTokens || 0) + (u.cumulativeOutputTokens || 0),
+      };
+      return;
+    }
+    if (data.usage) {
+      const u = data.usage;
+      this.tokenUsage = {
+        prompt_tokens: u.input_tokens || 0,
+        completion_tokens: u.output_tokens || 0,
+        total_tokens: (u.input_tokens || 0) + (u.output_tokens || 0),
+      };
+    }
+  }
+
+  setSessionId(id) {
+    this.sessionId = id;
+  }
+
+  getSessionId() {
+    return this.sessionId;
+  }
+
+  end() {}
+
+  finalize() {
+    const content = this.contentParts.join('');
+    const response = {
+      id: this.completionId,
+      object: 'chat.completion',
+      created: this.created,
+      model: this.model,
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content },
+        finish_reason: 'stop',
+      }],
+      usage: this.tokenUsage || null,
+    };
+    this.res.json(response);
+  }
+}
+
 export { router as openaiCompatRouter, parseModel, formatMessages, makeErrorResponse };
