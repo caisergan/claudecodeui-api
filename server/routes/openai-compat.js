@@ -199,4 +199,70 @@ class OpenAICompatWriter {
   }
 }
 
+router.post('/chat/completions', validateOpenAIAuth, async (req, res) => {
+  const { model: modelString, messages, stream = false } = req.body;
+
+  const parsed = parseModel(modelString);
+  if (parsed.error) {
+    return res.status(400).json(makeErrorResponse(parsed.error, 'invalid_request_error', 400));
+  }
+
+  const formatted = formatMessages(messages);
+  if (formatted.error) {
+    return res.status(400).json(makeErrorResponse(formatted.error, 'invalid_request_error', 400));
+  }
+
+  const { provider, model } = parsed;
+  const { prompt } = formatted;
+
+  if (stream) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+  }
+
+  const abortController = new AbortController();
+  const writer = new OpenAICompatWriter(res, { model: modelString, stream });
+  writer.userId = req.user?.id;
+
+  req.on('close', () => {
+    abortController.abort();
+  });
+
+  const cwd = os.tmpdir();
+  const agentOptions = {
+    cwd,
+    model,
+    permissionMode: 'bypassPermissions',
+    skipPermissions: true,
+    signal: abortController.signal,
+  };
+
+  try {
+    if (provider === 'claude') {
+      await queryClaudeSDK(prompt, agentOptions, writer);
+    } else if (provider === 'codex') {
+      await queryCodex(prompt, agentOptions, writer);
+    } else if (provider === 'gemini') {
+      await spawnGemini(prompt, agentOptions, writer);
+    }
+    if (!abortController.signal.aborted) {
+      writer.finalize();
+    }
+  } catch (err) {
+    if (abortController.signal.aborted) return;
+    if (stream) {
+      const errorChunk = { error: { message: err.message || 'Agent execution failed', type: 'server_error', code: 500 } };
+      res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } else {
+      if (!res.headersSent) {
+        res.status(500).json(makeErrorResponse(err.message || 'Agent execution failed', 'server_error', 500));
+      }
+    }
+  }
+});
+
 export { router as openaiCompatRouter, parseModel, formatMessages, makeErrorResponse };
